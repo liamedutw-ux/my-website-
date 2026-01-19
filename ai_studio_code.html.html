@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#f4f1ea">
+    <title>神話の旅</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts (日系字體) -->
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Shippori+Mincho:wght@500;700&family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Libraries -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        /* --- 和風配色系統 --- */
+        :root {
+            --japan-bg: #f4f1ea;        /* 生成色 (Washi Paper) */
+            --japan-red: #c24836;       /* 茜色 (Shrine Red) */
+            --japan-indigo: #2b3d54;    /* 藍鉄 (Indigo) */
+            --japan-gold: #c69f4c;      /* 金茶 (Gold) */
+            --japan-black: #333333;     /* 墨色 */
+            --japan-gray: #7d7d7d;      /* 銀鼠 */
+            --safe-top: env(safe-area-inset-top);
+            --safe-bottom: env(safe-area-inset-bottom);
+        }
+
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif; /* 圓體，可愛且易讀 */
+            background-color: var(--japan-bg);
+            color: var(--japan-black);
+            /* 和紙紋理背景 */
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d1d1d1' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            overscroll-behavior-y: none;
+        }
+
+        /* 標題專用字體 (明朝體) */
+        .serif { font-family: 'Shippori Mincho', serif; }
+        
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 和風卡片樣式 */
+        .wafu-card {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(43, 61, 84, 0.06); /* 輕微藍色陰影 */
+            border: 1px solid rgba(0,0,0,0.03);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* 裝飾線條 (水引結的感覺) */
+        .wafu-card::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 15%; bottom: 15%;
+            width: 3px;
+            background-color: #eee;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .card-active::before { background-color: var(--japan-red) !important; }
+
+        /* 直書文字 */
+        .tategaki {
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+            letter-spacing: 0.1em;
+        }
+
+        /* 底部導航 */
+        .glass-nav {
+            background: rgba(244, 241, 234, 0.95); /* 與背景同色系 */
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(0,0,0,0.05);
+            padding-bottom: var(--safe-bottom);
+        }
+
+        /* 交通連接線 */
+        .transport-line {
+            border-left: 2px dashed #bbb;
+            margin-left: 1.25rem;
+            padding-left: 1.5rem;
+            padding-bottom: 1.5rem;
+        }
+
+        .modal-enter { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        
+        .snap-x-mandatory { scroll-snap-type: x mandatory; }
+        .snap-center { scroll-snap-align: center; }
+        
+        #full-trip-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; filter: sepia(0.2); }
+    </style>
+</head>
+
+<body x-data="app()" x-init="initApp()" class="h-screen w-screen overflow-hidden flex flex-col">
+
+    <!-- 頂部資訊列 (和風版) -->
+    <header class="pt-[calc(var(--safe-top)+10px)] px-5 pb-4 bg-[var(--japan-bg)]/95 backdrop-blur z-20 flex justify-between items-end border-b border-stone-200 shadow-sm">
+        <div>
+            <div class="flex items-center gap-2 mb-1 opacity-70">
+                <i class="fa-solid fa-calendar-day text-[var(--japan-red)]"></i>
+                <span class="text-xs font-bold tracking-widest" x-text="currentDateDisplay"></span>
+                <span class="text-xs font-bold bg-stone-200 px-2 rounded-full text-stone-600" x-text="`Day ${currentDay}`"></span>
+            </div>
+            <h1 class="text-2xl font-bold serif text-[var(--japan-indigo)] tracking-widest" 
+                x-text="activeTab === 'dashboard' ? '旅程總覽' : (activeTab === 'wallet' ? '旅費帳簿' : getCurrentLocation())"></h1>
+        </div>
+        <div class="text-right">
+            <div class="text-3xl font-serif font-bold leading-none text-[var(--japan-black)]" x-text="currentTime"></div>
+            <div class="text-[9px] text-gray-500 font-bold mt-1 tracking-wider">JST 日本時間</div>
+        </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 overflow-y-auto hide-scrollbar pb-28 relative">
+        
+        <!-- Tab 1: 儀表板 (Dashboard) -->
+        <div x-show="activeTab === 'dashboard'" class="p-5 space-y-6 modal-enter">
+            
+            <!-- 天氣卡片 (和風漸層) -->
+            <div class="wafu-card p-5 bg-gradient-to-r from-[#2b3d54] to-[#4a5f7a] text-white shadow-lg relative overflow-hidden !border-none">
+                <!-- 背景波浪紋 (SVG) -->
+                <div class="absolute top-0 right-0 opacity-10 text-9xl -mr-4 -mt-4"><i class="fa-solid fa-water"></i></div>
+                
+                <div class="flex justify-between items-start z-10 relative">
+                    <div>
+                        <div class="text-[10px] font-bold opacity-80 uppercase tracking-widest mb-1">Current Weather</div>
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-5xl font-serif font-bold" x-text="weather.temp">--</span>
+                            <span class="text-xl serif">°C</span>
+                        </div>
+                        <div class="text-sm mt-2 font-medium flex items-center gap-1 opacity-90">
+                            <i class="fa-solid fa-location-dot text-xs"></i> <span x-text="getCurrentLocation()"></span>
+                        </div>
+                    </div>
+                    <div class="text-right flex flex-col items-center">
+                        <i :class="weather.icon" class="text-5xl mb-2 text-[var(--japan-gold)] drop-shadow-md"></i>
+                        <span class="text-xs tracking-wider" x-text="weather.desc">載入中</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 全景點地圖 -->
+            <div class="wafu-card p-2 h-72 relative border border-stone-200">
+                <div id="full-trip-map"></div>
+                <div class="absolute bottom-3 right-3 z-[400]">
+                    <button @click="openFullMap()" class="bg-white/90 text-[var(--japan-indigo)] px-4 py-2 rounded-full text-xs font-bold shadow-md border border-stone-200 flex items-center gap-2 active:scale-95 transition-transform">
+                        <i class="fa-solid fa-map-location-dot text-[var(--japan-red)]"></i> Google Maps
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 今日攻略 (卷軸風格) -->
+            <div class="wafu-card p-5 border-l-4 border-l-[var(--japan-red)] bg-[#fffcf5]">
+                <h3 class="font-bold text-[var(--japan-indigo)] mb-3 flex items-center text-sm uppercase tracking-wide serif border-b border-stone-200 pb-2">
+                    <i class="fa-solid fa-scroll mr-2 text-[var(--japan-red)]"></i>本日の指南 (Strategy)
+                </h3>
+                <p class="text-sm text-gray-700 leading-7 text-justify tracking-wide" x-text="getCurrentStrategy()"></p>
+            </div>
+
+            <!-- 實用連結區 -->
+            <div class="grid grid-cols-3 gap-3">
+                <a href="https://www.vjw.digital.go.jp/" target="_blank" class="wafu-card p-3 flex flex-col items-center justify-center text-stone-600 active:bg-stone-50 transition">
+                    <i class="fa-solid fa-passport text-xl mb-2 text-blue-600"></i>
+                    <span class="text-[10px] font-bold">VJW</span>
+                </a>
+                <div class="wafu-card p-3 flex flex-col items-center justify-center text-stone-600">
+                    <i class="fa-solid fa-hospital text-xl mb-2 text-red-500"></i>
+                    <span class="text-[10px] font-bold">緊急醫療</span>
+                </div>
+                <div class="wafu-card p-3 flex flex-col items-center justify-center text-stone-600">
+                    <i class="fa-solid fa-plane-departure text-xl mb-2 text-purple-600"></i>
+                    <span class="text-[10px] font-bold">航班 CI176</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: 行程 (Itinerary) -->
+        <div x-show="activeTab === 'itinerary'" class="min-h-full">
+            <!-- 日期與天氣 -->
+            <div class="sticky top-0 z-10 bg-[var(--japan-bg)]/95 backdrop-blur border-b border-stone-200 shadow-sm">
+                <div class="flex overflow-x-auto snap-x-mandatory py-3 px-4 space-x-3 hide-scrollbar" id="day-scroller">
+                    <template x-for="day in tripData" :key="day.day">
+                        <button @click="changeDay(day.day)" :id="'day-btn-' + day.day"
+                            class="snap-center flex-shrink-0 flex flex-col items-center justify-center w-12 h-16 rounded-full transition-all border border-stone-200 bg-white"
+                            :class="currentDay === day.day ? '!bg-[var(--japan-indigo)] !text-white !border-[var(--japan-indigo)] shadow-md scale-110' : 'text-gray-400'">
+                            <span class="text-[9px] font-bold uppercase mb-1">Day</span>
+                            <span class="text-lg font-serif font-bold" x-text="day.day"></span>
+                        </button>
+                    </template>
+                </div>
+                <!-- Hourly Weather -->
+                <div class="flex space-x-5 overflow-x-auto hide-scrollbar px-5 py-2 bg-[#fffcf5] border-b border-stone-100">
+                    <template x-for="hour in hourlyWeather" :key="hour.time">
+                        <div class="flex flex-col items-center min-w-[2.5rem]">
+                            <span class="text-[9px] text-gray-400" x-text="hour.time"></span>
+                            <i :class="hour.icon" class="text-xs my-1 text-[var(--japan-indigo)]"></i>
+                            <span class="text-[10px] font-bold text-stone-600" x-text="hour.temp + '°'"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Event List -->
+            <div class="p-4 pb-32">
+                <ul id="event-list" class="space-y-0">
+                    <template x-for="(event, index) in currentEvents" :key="event.id">
+                        <li>
+                            <!-- 交通類型：連接線樣式 -->
+                            <template x-if="event.type === '交通'">
+                                <div class="transport-line group relative" :data-id="event.id">
+                                    <div class="absolute -left-[9px] top-0 bg-stone-300 w-2 h-2 rounded-full border border-[var(--japan-bg)] z-10"></div>
+                                    <div class="wafu-card p-3 hover:shadow-md transition-shadow active:scale-[0.99]" @click="openEditModal(event)">
+                                        <div class="flex justify-between items-start">
+                                            <div class="flex gap-3">
+                                                <div class="text-[var(--japan-indigo)] text-lg w-6 text-center pt-0.5"><i :class="getTransportIcon(event.desc)"></i></div>
+                                                <div>
+                                                    <div class="font-bold text-stone-700 text-sm tracking-wide" x-text="event.title"></div>
+                                                    <div class="text-xs text-stone-500 mt-0.5 leading-relaxed" x-text="event.desc"></div>
+                                                    <template x-if="event.trainInfo">
+                                                        <div class="flex gap-1 mt-1.5">
+                                                            <span class="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-100" x-text="event.trainInfo.seat"></span>
+                                                            <span class="text-[9px] bg-stone-100 text-stone-600 px-1.5 py-0.5 rounded border border-stone-200" x-text="event.trainInfo.pass"></span>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-sm font-mono font-bold text-stone-600" x-text="event.time"></div>
+                                                <template x-if="event.bookingId">
+                                                    <button @click.stop="showBigText(event.bookingId)" class="mt-2 text-[10px] flex items-center justify-end gap-1 text-stone-400 hover:text-[var(--japan-indigo)]">
+                                                        <span class="font-mono tracking-wider border-b border-stone-300 pb-0.5">NO.</span>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="absolute right-0 top-0 bottom-0 w-8 flex items-center justify-center text-gray-200 drag-handle"><i class="fa-solid fa-grip-lines-vertical"></i></div>
+                                </div>
+                            </template>
+
+                            <!-- 景點/餐飲/其他：卡片樣式 -->
+                            <template x-if="event.type !== '交通'">
+                                <div class="relative pl-8 pb-6" :data-id="event.id">
+                                    <div class="absolute left-0 top-0 w-8 h-8 text-white rounded-full flex items-center justify-center z-10 shadow-sm text-xs border-2 border-[var(--japan-bg)]" 
+                                         :class="getIconColor(event.type)">
+                                        <i :class="getCategoryIcon(event.type)"></i>
+                                    </div>
+                                    
+                                    <div class="wafu-card p-4 hover:shadow-md transition-shadow active:scale-[0.99] border-l-4" 
+                                         :class="getBorderColor(event.type)"
+                                         @click="openEditModal(event)">
+                                        
+                                        <div class="flex justify-between items-start mb-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-100 text-stone-600" x-text="event.type"></span>
+                                            <span class="font-mono font-bold text-stone-400 text-sm" x-text="event.time"></span>
+                                        </div>
+
+                                        <h3 class="font-bold text-lg text-[var(--japan-black)] serif leading-tight mb-1" x-text="event.title"></h3>
+                                        <p class="text-xs text-stone-500 line-clamp-2 leading-relaxed" x-text="event.desc"></p>
+
+                                        <!-- 導遊攻略 -->
+                                        <template x-if="event.strategy">
+                                            <div class="mt-3 bg-[#fffcf5] p-2 rounded border border-stone-100/50" @click.stop>
+                                                <div class="text-[10px] font-bold text-[var(--japan-gold)] uppercase mb-1 flex items-center gap-1">
+                                                    <i class="fa-solid fa-circle-info"></i> Guide Tips
+                                                </div>
+                                                <p class="text-xs text-stone-600 leading-relaxed text-justify" x-text="event.strategy"></p>
+                                            </div>
+                                        </template>
+
+                                        <!-- 按鈕群 -->
+                                        <div class="flex gap-2 mt-3" @click.stop>
+                                            <a :href="getMapLink(event)" target="_blank" class="flex-1 bg-stone-50 text-stone-600 py-1.5 rounded text-[10px] font-bold text-center border border-stone-100 hover:bg-stone-100">
+                                                <i class="fa-solid fa-map-location-dot mr-1 text-[var(--japan-red)]"></i> 地圖
+                                            </a>
+                                            <template x-if="event.naviPhone">
+                                                <button @click="copyText(event.naviPhone)" class="flex-1 border border-blue-100 text-blue-600 bg-blue-50 py-1.5 rounded text-[10px] font-bold">
+                                                    <i class="fa-solid fa-car mr-1"></i> <span x-text="event.naviPhone"></span>
+                                                </button>
+                                            </template>
+                                            <template x-if="event.menu && event.menu.length > 0">
+                                                <button @click="speak(event.menu[0].jp)" class="w-8 flex items-center justify-center bg-orange-50 text-orange-600 rounded border border-orange-100">
+                                                    <i class="fa-solid fa-volume-high text-xs"></i>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="absolute right-0 top-8 w-8 h-8 flex items-center justify-center text-gray-200 drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+                                </div>
+                            </template>
+                        </li>
+                    </template>
+                </ul>
+                
+                <button @click="addNewEvent()" class="w-full mt-4 py-3 rounded-xl border border-dashed border-stone-300 text-stone-400 font-bold hover:bg-white flex items-center justify-center gap-2 bg-transparent">
+                    <i class="fa-solid fa-plus"></i> 新增行程
+                </button>
+            </div>
+        </div>
+
+        <!-- Tab 3: 錢包 (Wallet) -->
+        <div x-show="activeTab === 'wallet'" class="p-5 space-y-5 modal-enter">
+            <!-- 總計卡 -->
+            <div class="wafu-card p-6 bg-[var(--japan-indigo)] text-white text-center shadow-lg relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-full h-1 bg-[var(--japan-gold)]"></div>
+                <p class="text-xs font-bold opacity-60 uppercase tracking-widest mb-3">Total Estimated Cost</p>
+                <div class="flex items-baseline justify-center gap-1">
+                    <span class="text-2xl opacity-70 serif">¥</span>
+                    <span class="text-5xl font-bold font-mono tracking-tighter" x-text="totalCost.toLocaleString()"></span>
+                </div>
+                <div class="text-sm text-[var(--japan-gold)] mt-2 font-bold bg-white/10 inline-block px-3 py-1 rounded-full border border-white/10">
+                    ≈ NT$ <span x-text="Math.round(totalCost * exchangeRate).toLocaleString()"></span>
+                </div>
+            </div>
+
+            <!-- 匯率 -->
+            <div class="wafu-card p-3 flex justify-between items-center">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-green-50 text-green-700 flex items-center justify-center"><i class="fa-solid fa-money-bill-transfer"></i></div>
+                    <div class="text-xs font-bold text-stone-600">匯率 (JPY/TWD)</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="number" step="0.001" x-model="exchangeRate" class="w-16 text-right font-mono font-bold bg-stone-50 rounded p-1 border border-stone-200 text-sm text-stone-700">
+                    <a href="https://rate.bot.com.tw/xrt?Lang=zh-TW" target="_blank" class="text-[10px] text-blue-500 underline">台銀</a>
+                </div>
+            </div>
+
+            <!-- 類別花費 -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="wafu-card p-3 flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fa-solid fa-train"></i></div>
+                    <div>
+                        <div class="text-[10px] text-stone-400">交通</div>
+                        <div class="font-bold text-sm text-stone-700">¥<span x-text="getCategoryCost('交通').toLocaleString()"></span></div>
+                    </div>
+                </div>
+                <div class="wafu-card p-3 flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center"><i class="fa-solid fa-torii-gate"></i></div>
+                    <div>
+                        <div class="text-[10px] text-stone-400">景點/門票</div>
+                        <div class="font-bold text-sm text-stone-700">¥<span x-text="getCategoryCost('景點').toLocaleString()"></span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 匯出與重置 -->
+            <button @click="exportData()" class="w-full py-3 bg-white border border-stone-200 rounded-xl text-stone-600 text-sm font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition">
+                <i class="fa-brands fa-google-drive"></i> 匯出備份 (JSON)
+            </button>
+            
+            <div class="text-center pt-8 pb-10">
+                <button @click="resetData()" class="bg-red-50 text-[var(--japan-red)] font-bold py-3 px-6 rounded-xl text-sm shadow-sm border border-red-100 flex items-center justify-center gap-2 mx-auto">
+                    <i class="fa-solid fa-rotate-right"></i> 重置為 17 天完整行程
+                </button>
+                <p class="text-[10px] text-stone-400 mt-2">首次開啟請點擊此處載入完整資料</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal: 編輯 (和風版) -->
+    <div x-show="isModalOpen" class="fixed inset-0 z-50 flex items-end justify-center" x-cloak>
+        <div class="absolute inset-0 bg-[#2b3d54]/60 backdrop-blur-sm transition-opacity" @click="closeModal()"></div>
+        <div class="bg-[#fcfbf9] w-full max-w-md rounded-t-[24px] p-6 modal-enter relative z-10 pb-[calc(var(--safe-bottom)+20px)] shadow-2xl h-[80vh] overflow-y-auto">
+            <div class="w-12 h-1.5 bg-stone-200 rounded-full mx-auto mb-6"></div>
+            <div class="flex justify-between items-center mb-6 border-b border-stone-200 pb-2">
+                <h2 class="text-xl font-bold serif text-[var(--japan-indigo)]" x-text="editingEvent.id ? '行程編集' : '新規追加'"></h2>
+                <button @click="closeModal()" class="w-8 h-8 bg-stone-100 rounded-full text-stone-500"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="space-y-5">
+                <div class="flex gap-4">
+                    <div class="flex-1">
+                        <label class="text-xs font-bold text-stone-400 uppercase block mb-1.5">時間</label>
+                        <input type="time" x-model="editingEvent.time" class="w-full bg-white border border-stone-200 rounded-xl p-3 font-bold outline-none focus:border-[var(--japan-indigo)] text-stone-700">
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-xs font-bold text-stone-400 uppercase block mb-1.5">種類</label>
+                        <select x-model="editingEvent.type" class="w-full bg-white border border-stone-200 rounded-xl p-3 font-bold outline-none focus:border-[var(--japan-indigo)] text-stone-700">
+                            <option>景點</option><option>交通</option><option>餐飲</option><option>住宿</option><option>購物</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-stone-400 uppercase block mb-1.5">項目名稱</label>
+                    <input type="text" x-model="editingEvent.title" class="w-full bg-white border border-stone-200 rounded-xl p-3 font-bold outline-none focus:border-[var(--japan-indigo)] text-stone-700">
+                </div>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
+                    <label class="text-xs font-bold text-blue-600 uppercase flex items-center gap-1"><i class="fa-solid fa-coins"></i> 花費 (JPY)</label>
+                    <div class="relative w-32">
+                        <span class="absolute left-3 top-2.5 font-bold text-blue-900">¥</span>
+                        <input type="number" x-model="editingEvent.cost" class="w-full bg-white rounded-lg pl-7 p-2 font-mono font-bold outline-none text-right text-blue-900 border border-blue-200">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-stone-400 uppercase block mb-1.5">詳細備註 / 攻略</label>
+                    <textarea x-model="editingEvent.desc" rows="3" class="w-full bg-white border border-stone-200 rounded-xl p-3 text-sm outline-none focus:border-[var(--japan-indigo)] text-stone-600 resize-none"></textarea>
+                </div>
+                <div class="flex gap-3 mt-4">
+                    <button x-show="editingEvent.id" @click="deleteEvent()" class="flex-1 py-3 rounded-xl bg-stone-100 text-red-500 font-bold border border-stone-200">削除</button>
+                    <button @click="saveEvent()" class="flex-[2] py-3 rounded-xl bg-[var(--japan-indigo)] text-white font-bold shadow-lg active:scale-95 transition-transform">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: 大字卡 -->
+    <div x-show="bigTextOpen" class="fixed inset-0 z-[60] bg-[var(--japan-indigo)] flex flex-col items-center justify-center modal-enter" @click="bigTextOpen = false" x-cloak>
+        <div class="transform rotate-90 flex flex-col items-center p-8 border-4 border-white/20">
+            <p class="text-white/60 mb-4 text-sm uppercase tracking-widest font-serif">Booking Reference</p>
+            <h1 class="text-white font-mono font-bold text-[15vh] whitespace-nowrap leading-none" x-text="bigTextContent"></h1>
+        </div>
+    </div>
+
+    <!-- 底部導航 -->
+    <nav class="fixed bottom-0 w-full glass-nav z-40">
+        <div class="flex justify-around items-center h-16 max-w-md mx-auto">
+            <button @click="switchTab('dashboard')" class="flex flex-col items-center w-16 transition-all duration-300" :class="activeTab === 'dashboard' ? 'text-[var(--japan-indigo)] -translate-y-1' : 'text-stone-400'">
+                <i class="fa-solid fa-compass text-xl mb-1"></i><span class="text-[10px] font-bold">總覽</span>
+            </button>
+            <button @click="switchTab('itinerary')" class="flex flex-col items-center w-16 transition-all duration-300" :class="activeTab === 'itinerary' ? 'text-[var(--japan-indigo)] -translate-y-1' : 'text-stone-400'">
+                <div class="relative"><i class="fa-solid fa-torii-gate text-xl mb-1"></i></div><span class="text-[10px] font-bold">行程</span>
+            </button>
+            <button @click="switchTab('wallet')" class="flex flex-col items-center w-16 transition-all duration-300" :class="activeTab === 'wallet' ? 'text-[var(--japan-indigo)] -translate-y-1' : 'text-stone-400'">
+                <i class="fa-solid fa-sack-dollar text-xl mb-1"></i><span class="text-[10px] font-bold">帳簿</span>
+            </button>
+        </div>
+    </nav>
+
+    <script>
+        // --- 17天完整數據 (100% 補完 PDF 內容) ---
+        const FULL_TRIP_DATA = [
+            { day: 1, date: '1/26', location: '大阪 Osaka', lat: 34.6937, lon: 135.5023, strategy: '入境日。建議先在機場兌換JR Pass，並購買ICOCA。晚餐前往新世界體驗串炸，這是大阪的靈魂食物。', events: [
+                {id: 101, time: '15:25', type: '交通', title: '航班起飛', desc: '高雄 → 大阪 CI176', cost: 0},
+                {id: 102, time: '19:10', type: '交通', title: '抵達關西機場', desc: '辦理入境手續', cost: 0},
+                {id: 103, time: '20:00', type: '交通', title: '南海電鐵 空港急行', desc: '關西機場 → 新今宮', bookingId: 'NK-EXP-8821', cost: 930},
+                {id: 104, time: '20:50', type: '住宿', title: 'Hotel Lucky', desc: '新今宮區域，經濟型住宿，交通便利', naviPhone: '06-6647-1111', cost: 1998},
+                {id: 105, time: '21:30', type: '餐飲', title: '串炸達摩', desc: '元祖串炸套餐', menu: [{jp:'元祖串かつセット'}], cost: 2000}
+            ]},
+            { day: 2, date: '1/27', location: '伊勢 Ise', lat: 34.4550, lon: 136.7258, strategy: '伊勢神宮是日本人的精神故鄉。古禮：先參拜外宮(左側通行)，再參拜內宮(右側通行)。外宮必看「御正宮」。', events: [
+                {id: 201, time: '07:10', type: '交通', title: '大和路快速', desc: '大阪 → 加茂 → 龜山 → 津 (轉乘 JR 紀勢本線)', trainInfo: {seat: '自由席', pass: '伊勢熊野Pass'}, cost: 0},
+                {id: 202, time: '11:30', type: '景點', title: '伊勢神宮 外宮', desc: '豐受大神宮', strategy: '掌管食物與產業。正宮內不可拍照，僅可在板垣外參拜。', mapLink: 'https://goo.gl/maps/IseGeku', cost: 0},
+                {id: 203, time: '12:30', type: '餐飲', title: '山口屋', desc: '名物：伊勢烏龍麵', menu: [{jp:'伊勢うどん'}], cost: 1000},
+                {id: 204, time: '14:30', type: '景點', title: '伊勢神宮 內宮', desc: '皇大神宮', strategy: '越過宇治橋象徵進入神域。五十鈴川御手洗場可洗手淨身。', mapLink: 'https://goo.gl/maps/IseNaiku', cost: 0},
+                {id: 205, time: '17:30', type: '餐飲', title: '御蔭橫丁', desc: '赤福餅與伴手禮', menu: [{jp:'赤福餅'}], cost: 1500},
+                {id: 206, time: '18:30', type: '住宿', title: 'Hotel Areaone Ise', desc: '伊勢市站前', cost: 6080}
+            ]},
+            { day: 3, date: '1/28', location: '二見浦', lat: 34.5090, lon: 136.7865, strategy: '古代參拜伊勢前需先至二見浦進行「禊」（淨身）。夫婦岩是求良緣與家庭圓滿的聖地。', events: [
+                {id: 301, time: '09:00', type: '交通', title: 'CAN Bus', desc: '伊勢市 → 二見浦', trainInfo: {seat: '自由席', pass: 'Pass含'}, cost: 0},
+                {id: 302, time: '09:30', type: '景點', title: '二見興玉神社', desc: '夫婦岩', strategy: '滿是青蛙雕像，日語青蛙(Kaeru)與「平安歸來」同音。', mapLink: 'https://goo.gl/maps/Futami', cost: 0},
+                {id: 303, time: '13:30', type: '景點', title: '賓日館', desc: '皇室御用住宿設施', cost: 300},
+                {id: 304, time: '16:00', type: '景點', title: '猿田彥神社', desc: '引路之神', naviPhone: '0596-22-2554', cost: 0},
+                {id: 305, time: '18:00', type: '住宿', title: 'Hotel Areaone Ise', desc: '續住', cost: 6080}
+            ]},
+            { day: 4, date: '1/29', location: '熊野', lat: 33.6263, lon: 135.9405, strategy: '進入神佛習合的聖地。那智瀑布被視為神體。注意南紀特急班次極少，切勿遲到。', events: [
+                {id: 401, time: '09:21', type: '交通', title: '特急 南紀1號', desc: '松阪 → 紀伊勝浦', bookingId: 'JR-NANKI-01', trainInfo: {seat: '指定席', pass: 'Pass含'}, cost: 0},
+                {id: 402, time: '14:00', type: '景點', title: '熊野速玉大社', desc: '神木「梛」', strategy: '巨大的梛樹已有千年樹齡，據說撿拾落葉可保平安良緣。', cost: 0},
+                {id: 403, time: '16:00', type: '景點', title: '熊野那智大社', desc: '那智瀑布', strategy: '經典攝影機位：三重塔與那智瀑布同框。青岸渡寺緊鄰神社。', mapLink: 'https://goo.gl/maps/Nachi', cost: 300},
+                {id: 404, time: '19:00', type: '餐飲', title: '勝浦生鮪魚', desc: '大和/竹原', menu: [{jp:'マグロ丼'}], cost: 2500},
+                {id: 405, time: '20:00', type: '住宿', title: 'Blue Harbor', desc: '民宿', cost: 6000}
+            ]},
+            { day: 5, date: '1/30', location: '本宮', lat: 33.8427, lon: 135.7744, strategy: '大齋原是日本最大鳥居，能量場極強。熊野本宮大社需攀登158階石階。', events: [
+                {id: 501, time: '09:00', type: '交通', title: '熊野巴士', desc: '勝浦 → 本宮大社前', trainInfo: {seat: '自由席', pass: 'Pass含'}, cost: 0},
+                {id: 502, time: '10:30', type: '景點', title: '熊野本宮大社', desc: '八咫烏', strategy: '八咫烏（三足烏鴉）是這裡的象徵，代表引導。', cost: 0},
+                {id: 503, time: '11:30', type: '景點', title: '大齋原', desc: '巨大鳥居', strategy: '矗立在稻田中的巨大鳥居，為舊社殿原址。', cost: 0},
+                {id: 504, time: '15:21', type: '交通', title: '特急 Kuroshio', desc: '紀伊勝浦 → 和歌山', bookingId: 'JR-KURO-30', cost: 0},
+                {id: 505, time: '18:30', type: '住宿', title: 'Business Inn', desc: '和歌山市', cost: 4500}
+            ]},
+            { day: 6, date: '1/31', location: '和歌山', lat: 34.2260, lon: 135.1675, strategy: '丹生都比賣神社是高野山的守護神。日前宮地位崇高，供奉神鏡。', events: [
+                {id: 601, time: '08:35', type: '交通', title: '葛城町社區巴士', desc: '笠田站 → 丹生都比賣神社', cost: 200},
+                {id: 602, time: '09:50', type: '景點', title: '丹生都比賣神社', desc: '紀伊國一宮', strategy: '朱紅色的太鼓橋是標誌。需轉乘社區巴士。', cost: 0},
+                {id: 603, time: '13:00', type: '交通', title: '和歌山電鐵', desc: '貴志川線 (貓站長)', cost: 0},
+                {id: 604, time: '13:30', type: '景點', title: '甘露寺', desc: '鬼滅之刃聖地', cost: 0},
+                {id: 605, time: '14:45', type: '景點', title: '日前/國懸神宮', desc: '供奉神鏡', cost: 0},
+                {id: 606, time: '15:30', type: '景點', title: '和歌山城', desc: '德川家城堡', cost: 410},
+                {id: 607, time: '17:15', type: '交通', title: '特急 Kuroshio', desc: '和歌山 → 大阪', cost: 0},
+                {id: 608, time: '18:30', type: '住宿', title: 'Hotel Lucky', desc: '大阪', cost: 2200}
+            ]},
+            { day: 7, date: '2/1', location: '岡山', lat: 34.6551, lon: 133.9195, strategy: '桃太郎傳說原型。吉備津神社必看全長360公尺的迴廊與「鳴釜神事」。', events: [
+                {id: 701, time: '07:23', type: '交通', title: '新幹線 Sakura', desc: '新大阪 → 岡山', bookingId: 'JR-SAKURA-541', cost: 0},
+                {id: 702, time: '10:15', type: '景點', title: '中山神社', desc: '美作國一宮 (津山)', naviPhone: '0868-22-7777', cost: 0},
+                {id: 703, time: '11:45', type: '景點', title: '津山城', desc: '備中櫓', cost: 300},
+                {id: 704, time: '15:15', type: '景點', title: '吉備津神社', desc: '吉備津造', naviPhone: '086-287-4111', cost: 0},
+                {id: 705, time: '16:45', type: '景點', title: '吉備津彥神社', desc: '備前國一宮', cost: 0},
+                {id: 706, time: '18:00', type: '住宿', title: '岡山環球飯店', desc: '岡山站前', cost: 4580}
+            ]},
+            { day: 8, date: '2/2', location: '出雲', lat: 35.3695, lon: 132.7563, strategy: '日本最強結緣地。參拜禮儀特殊：「二禮四拍手一禮」。記得去素鵞社取能量之沙。', events: [
+                {id: 801, time: '07:05', type: '交通', title: '特急 Yakumo', desc: '岡山 → 米子', bookingId: 'JR-YAKUMO-01', cost: 0},
+                {id: 802, time: '11:45', type: '景點', title: '松江城', desc: '國寶天守閣', cost: 680},
+                {id: 803, time: '14:15', type: '景點', title: '出雲大社', desc: '神樂殿大注連繩', mapLink: 'https://goo.gl/maps/Izumo', cost: 0},
+                {id: 804, time: '16:30', type: '餐飲', title: '出雲蕎麥麵', desc: '割子蕎麥', menu: [{jp:'割子そば'}], cost: 1200},
+                {id: 805, time: '17:30', type: '住宿', title: '米子環球飯店', desc: '米子站前', cost: 4577}
+            ]},
+            { day: 9, date: '2/3', location: '石見', lat: 35.1920, lon: 132.4435, strategy: '世界遺產巡禮。石見銀山建議租借電動自行車遊覽，省時省力。', events: [
+                {id: 901, time: '08:30', type: '交通', title: '特急 Super Oki', desc: '米子 → 大田市', bookingId: 'JR-OKI-01', cost: 0},
+                {id: 902, time: '09:30', type: '景點', title: '石見銀山', desc: '龍源寺間步 (巴士費 ¥760)', cost: 760},
+                {id: 903, time: '14:00', type: '景點', title: '物部神社', desc: '石見國一宮', cost: 0},
+                {id: 904, time: '17:53', type: '交通', title: '特急 Super Oki', desc: '大田市 → 米子', cost: 0},
+                {id: 905, time: '19:00', type: '住宿', title: '米子環球飯店', desc: '續住', cost: 4577}
+            ]},
+            { day: 10, date: '2/4', location: '鳥取', lat: 35.5011, lon: 134.2351, strategy: '因幡白兔傳說之地。宇倍神社主神武內宿禰曾印在日幣上，求財運必去。', events: [
+                {id: 1001, time: '08:30', type: '交通', title: '特急 Matsukaze', desc: '米子 → 鳥取', cost: 0},
+                {id: 1002, time: '10:00', type: '景點', title: '鳥取城/仁風閣', desc: '久松公園', cost: 0},
+                {id: 1003, time: '13:30', type: '景點', title: '宇倍神社', desc: '因幡國一宮', naviPhone: '0857-22-5025', cost: 0},
+                {id: 1004, time: '16:30', type: '景點', title: '倭文神社', desc: '伯耆國一宮 (關鍵巴士:13:38)', cost: 350},
+                {id: 1005, time: '18:00', type: '餐飲', title: '松葉蟹料理', desc: '冬之味覺', menu: [{jp:'カニ刺身'}], cost: 5000},
+                {id: 1006, time: '20:00', type: '住宿', title: '米子環球飯店', desc: '續住', cost: 4577}
+            ]},
+            { day: 11, date: '2/5', location: '松江', lat: 35.4722, lon: 133.0505, strategy: '「兩參拜」習俗：美保神社(惠比壽/事代主)與出雲大社(大國主)共拜，效果加倍。', events: [
+                {id: 1101, time: '08:55', type: '交通', title: '一畑巴士+社區巴士', desc: '松江 → 美保關 (轉車1次)', cost: 960},
+                {id: 1102, time: '09:30', type: '景點', title: '美保神社', desc: '惠比壽總本宮', cost: 0},
+                {id: 1103, time: '14:30', type: '景點', title: '八重垣神社', desc: '鏡之池占卜 (巴士 ¥500)', strategy: '放上和紙與硬幣，下沉速度越快代表良緣來得越早。', cost: 500},
+                {id: 1104, time: '18:00', type: '住宿', title: '米子環球飯店', desc: '最後一晚', cost: 4577}
+            ]},
+            { day: 12, date: '2/6', location: '豐岡', lat: 35.5417, lon: 134.8217, strategy: '熊川宿是日本遺產。出石有「但馬小京都」之稱。必吃「出石蕎麥麵」。', events: [
+                {id: 1201, time: '08:55', type: '交通', title: 'JR巴士 若江線', desc: '小濱 → 熊川宿', cost: 0},
+                {id: 1202, time: '09:30', type: '景點', title: '熊川宿', desc: '鯖魚街道宿場町', cost: 0},
+                {id: 1203, time: '13:00', type: '景點', title: '若狹姬神社', desc: '若狹一宮 (下社)', cost: 0},
+                {id: 1204, time: '15:48', type: '交通', title: 'JR小濱線', desc: '小濱 → 西舞鶴', cost: 0},
+                {id: 1205, time: '17:30', type: '住宿', title: 'Maizuru Grand Hotel', desc: '西舞鶴站前', cost: 12950}
+            ]},
+            { day: 13, date: '2/7', location: '京都', lat: 35.0116, lon: 135.7681, strategy: '出雲大神宮被稱為「元出雲」。比叡山是鎮護國家的聖山，位於京都鬼門。', events: [
+                {id: 1301, time: '06:46', type: '交通', title: '特急 Maizuru', desc: '西舞鶴 → 京都', cost: 0},
+                {id: 1302, time: '10:30', type: '景點', title: '三井寺', desc: '國寶金堂', cost: 600},
+                {id: 1303, time: '11:00', type: '交通', title: '坂本纜車', desc: '前往比叡山頂 (來回)', cost: 1660},
+                {id: 1304, time: '11:15', type: '景點', title: '比叡山延曆寺', desc: '根本中堂/不滅法燈', cost: 1000},
+                {id: 1305, time: '15:35', type: '景點', title: '上賀茂神社', desc: '山城國一宮', cost: 0},
+                {id: 1306, time: '16:45', type: '景點', title: '下鴨神社', desc: '糾之森', cost: 0},
+                {id: 1307, time: '20:00', type: '住宿', title: '達亞旅館', desc: '京都站周邊', cost: 4360}
+            ]},
+            { day: 14, date: '2/8', location: '滋賀', lat: 35.2818, lon: 136.1265, strategy: '琵琶湖神之島。竹生島弁才天需搭船，試試「投擲陶盤」祈願。', events: [
+                {id: 1401, time: '09:30', type: '交通', title: '竹生島汽船', desc: '今津港 → 竹生島', cost: 3400},
+                {id: 1402, time: '10:00', type: '景點', title: '寶嚴寺', desc: '竹生島弁才天', cost: 600},
+                {id: 1403, time: '13:40', type: '景點', title: '多賀大社', desc: '近江國一宮 (近江鐵道 ¥920)', cost: 920},
+                {id: 1404, time: '15:40', type: '景點', title: '建部大社', desc: '供奉日本武尊', cost: 0},
+                {id: 1405, time: '21:00', type: '住宿', title: '達亞旅館', desc: '續住', cost: 4360}
+            ]},
+            { day: 15, date: '2/9', location: '姬路', lat: 34.8394, lon: 134.6939, strategy: '姬路城天守閣樓梯陡峭，建議穿著好走的襪子。生田神社是神戶結緣名所。', events: [
+                {id: 1501, time: '07:45', type: '景點', title: '石清水八幡宮', desc: '男山纜車 (來回 ¥600)', cost: 600},
+                {id: 1502, time: '10:00', type: '景點', title: '姬路城', desc: '白鷺城(世界遺產)', cost: 1000},
+                {id: 1503, time: '13:30', type: '景點', title: '湊川神社', desc: '神戶', cost: 0},
+                {id: 1504, time: '14:45', type: '景點', title: '生田神社', desc: '神戶三宮', cost: 0},
+                {id: 1505, time: '16:20', type: '景點', title: '西宮神社', desc: '惠比壽總社 (計程車 ¥700)', cost: 700},
+                {id: 1506, time: '20:00', type: '住宿', title: '3U NAMBA MINAMI', desc: '大阪新今宮', cost: 4560}
+            ]},
+            { day: 16, date: '2/10', location: '大阪', lat: 34.6128, lon: 135.4937, strategy: '攝津國一宮巡禮。住吉大社反橋象徵除穢。', events: [
+                {id: 1601, time: '08:30', type: '景點', title: '大神神社', desc: '大和國一宮 (三輪)', cost: 0},
+                {id: 1602, time: '10:50', type: '景點', title: '橿原神宮', desc: '日本建國之地', cost: 0},
+                {id: 1603, time: '13:40', type: '景點', title: '法隆寺', desc: '世界最古木造建築', cost: 1500},
+                {id: 1604, time: '17:30', type: '購物', title: 'Montbell 天王寺', desc: '採買裝備', cost: 0},
+                {id: 1605, time: '19:00', type: '餐飲', title: 'Harves 超市', desc: '晚餐/伴手禮', cost: 2000},
+                {id: 1606, time: '20:00', type: '住宿', title: '3U NAMBA MINAMI', desc: '續住', cost: 4560}
+            ]},
+            { day: 17, date: '2/11', location: '大阪', lat: 34.6851, lon: 135.8048, strategy: '最後巡禮。利用地鐵一日券或IC卡。下午搭乘 Haruka 直達機場。', events: [
+                {id: 1701, time: '08:30', type: '景點', title: '坐摩神社', desc: '攝津國一宮 (本町)', cost: 0},
+                {id: 1702, time: '10:00', type: '景點', title: '四天王寺', desc: '中心伽藍', cost: 300},
+                {id: 1703, time: '12:00', type: '景點', title: '住吉大社', desc: '攝津國一宮', cost: 0},
+                {id: 1704, time: '13:50', type: '景點', title: '大鳥大社', desc: '和泉國一宮 (鳳站)', cost: 0},
+                {id: 1705, time: '17:14', type: '交通', title: '關空快速/Haruka', desc: '前往關西機場', cost: 0},
+                {id: 1706, time: '20:10', type: '交通', title: '航班起飛', desc: 'CI177 返台', cost: 0}
+            ]}
+        ];
+
+        function app() {
+            return {
+                activeTab: 'itinerary',
+                currentDay: 1,
+                currentTime: '00:00',
+                weather: { temp: '--', icon: 'fa-solid fa-spinner fa-spin', desc: '載入中...' },
+                hourlyWeather: [],
+                exchangeRate: 0.22,
+                map: null,
+                
+                // 初始化資料
+                tripData: JSON.parse(localStorage.getItem('trip_data_v9')) || JSON.parse(JSON.stringify(FULL_TRIP_DATA)),
+
+                isModalOpen: false,
+                bigTextOpen: false,
+                bigTextContent: '',
+                editingEvent: {},
+                sortableInstance: null,
+
+                initApp() {
+                    this.startClock();
+                    this.initSortable();
+                    this.fetchWeather();
+                    setTimeout(() => this.initMap(), 500);
+                    
+                    // 監聽數據變更自動存檔
+                    this.$watch('tripData', val => {
+                        localStorage.setItem('trip_data_v9', JSON.stringify(val));
+                    });
+                },
+
+                // 切換分頁並確保地圖渲染
+                switchTab(tab) {
+                    this.activeTab = tab;
+                    if (tab === 'dashboard') {
+                        setTimeout(() => this.initMap(), 200);
+                    }
+                },
+
+                // 地圖初始化
+                initMap() {
+                    if (document.getElementById('full-trip-map') && !this.map) {
+                        this.map = L.map('full-trip-map').setView([34.6937, 135.5023], 6);
+                        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(this.map);
+                        
+                        this.tripData.forEach(d => {
+                            L.circleMarker([d.lat, d.lon], {
+                                radius: 5, 
+                                color: '#c24836', 
+                                fillOpacity: 0.9,
+                                fillColor: '#fff'
+                            }).addTo(this.map).bindPopup(`<b style="color:#c24836">Day ${d.day}</b><br>${d.location}`);
+                        });
+                    } else if (this.map) {
+                        this.map.invalidateSize();
+                    }
+                },
+
+                // 重置功能
+                resetData() {
+                    if(confirm('將重置為 V9.0 完整補完版數據，確定嗎？')) {
+                        this.tripData = JSON.parse(JSON.stringify(FULL_TRIP_DATA));
+                        alert('數據已更新！');
+                        window.location.reload();
+                    }
+                },
+
+                // 匯出備份
+                exportData() {
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.tripData));
+                    const downloadAnchorNode = document.createElement('a');
+                    downloadAnchorNode.setAttribute("href", dataStr);
+                    downloadAnchorNode.setAttribute("download", "japan_trip_v9.json");
+                    document.body.appendChild(downloadAnchorNode);
+                    downloadAnchorNode.click();
+                    downloadAnchorNode.remove();
+                },
+
+                // 計算邏輯
+                get currentEvents() {
+                    const dayData = this.tripData.find(d => d.day === this.currentDay);
+                    if (!dayData.events) dayData.events = [];
+                    return dayData.events;
+                },
+                get currentDateDisplay() { return this.tripData.find(d => d.day === this.currentDay)?.date || ''; },
+                get totalCost() {
+                    let total = 0;
+                    this.tripData.forEach(day => { if(day.events) day.events.forEach(e => total += parseInt(e.cost || 0)); });
+                    return total;
+                },
+                
+                // 輔助樣式函數
+                getCategoryIcon(type) {
+                    const map = { '景點': 'fa-solid fa-torii-gate', '交通': 'fa-solid fa-train', '餐飲': 'fa-solid fa-utensils', '住宿': 'fa-solid fa-bed', '購物': 'fa-solid fa-bag-shopping' };
+                    return map[type] || 'fa-solid fa-circle';
+                },
+                getIconColor(type) {
+                    if(type === '景點') return 'bg-[var(--japan-red)]';
+                    if(type === '餐飲') return 'bg-[var(--japan-gold)]';
+                    if(type === '住宿') return 'bg-[var(--japan-indigo)]';
+                    return 'bg-stone-400';
+                },
+                getBorderColor(type) {
+                    if(type === '景點') return 'border-l-[var(--japan-red)]';
+                    if(type === '餐飲') return 'border-l-[var(--japan-gold)]';
+                    if(type === '住宿') return 'border-l-[var(--japan-indigo)]';
+                    return 'border-l-stone-300';
+                },
+                getCategoryCost(type) {
+                    let total = 0;
+                    this.tripData.forEach(d => {
+                        if(d.events) d.events.filter(e => type === '景點' ? (e.type === '景點' || e.type === '購物') : e.type === type)
+                                      .forEach(e => total += parseInt(e.cost || 0));
+                    });
+                    return total;
+                },
+
+                changeDay(day) {
+                    this.currentDay = day;
+                    this.initSortable();
+                    this.fetchWeather();
+                    const el = document.getElementById(`day-btn-${day}`);
+                    if(el) el.scrollIntoView({behavior: 'smooth', inline: 'center'});
+                },
+
+                getCurrentLocation() { return this.tripData.find(d => d.day === this.currentDay)?.location || '日本'; },
+                getCurrentStrategy() { return this.tripData.find(d => d.day === this.currentDay)?.strategy || 'Enjoy your trip!'; },
+                getCurrentDayData() { return this.tripData.find(d => d.day === this.currentDay); },
+
+                initSortable() {
+                    if(this.sortableInstance) this.sortableInstance.destroy();
+                    this.$nextTick(() => {
+                        const el = document.getElementById('event-list');
+                        if(!el) return;
+                        this.sortableInstance = new Sortable(el, {
+                            handle: '.drag-handle',
+                            animation: 150,
+                            ghostClass: 'opacity-50',
+                            onEnd: (evt) => {
+                                const dayData = this.tripData.find(d => d.day === this.currentDay);
+                                const movedItem = dayData.events.splice(evt.oldIndex, 1)[0];
+                                dayData.events.splice(evt.newIndex, 0, movedItem);
+                                this.tripData = [...this.tripData];
+                            }
+                        });
+                    });
+                },
+
+                openEditModal(event) { this.editingEvent = { ...event }; this.isModalOpen = true; },
+                addNewEvent() { this.editingEvent = { id: null, time: '09:00', type: '景點', title: '', desc: '', cost: 0 }; this.isModalOpen = true; },
+                closeModal() { this.isModalOpen = false; },
+                
+                saveEvent() {
+                    const dayIndex = this.tripData.findIndex(d => d.day === this.currentDay);
+                    let events = this.tripData[dayIndex].events;
+                    if (this.editingEvent.id) {
+                        const idx = events.findIndex(e => e.id === this.editingEvent.id);
+                        events[idx] = { ...this.editingEvent };
+                    } else {
+                        this.editingEvent.id = Date.now();
+                        events.push(this.editingEvent);
+                        events.sort((a,b) => a.time.localeCompare(b.time));
+                    }
+                    this.tripData = [...this.tripData];
+                    this.closeModal();
+                    this.initSortable();
+                },
+
+                deleteEvent() {
+                    if(!confirm('確定刪除？')) return;
+                    const dayIndex = this.tripData.findIndex(d => d.day === this.currentDay);
+                    this.tripData[dayIndex].events = this.tripData[dayIndex].events.filter(e => e.id !== this.editingEvent.id);
+                    this.tripData = [...this.tripData];
+                    this.closeModal();
+                },
+
+                startClock() {
+                    setInterval(() => {
+                        const now = new Date();
+                        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+                        const jst = new Date(utc + (3600000 * 9));
+                        this.currentTime = jst.getHours().toString().padStart(2, '0') + ':' + jst.getMinutes().toString().padStart(2, '0');
+                    }, 1000);
+                },
+
+                fetchWeather() {
+                    const { lat, lon } = this.getCurrentDayData();
+                    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&timezone=Asia%2FTokyo`)
+                        .then(r => r.json())
+                        .then(d => {
+                            this.weather = {
+                                temp: Math.round(d.current.temperature_2m),
+                                icon: this.getWeatherIcon(d.current.weather_code),
+                                desc: this.getWeatherDesc(d.current.weather_code)
+                            };
+                            const currentHour = new Date().getHours();
+                            this.hourlyWeather = d.hourly.time.slice(currentHour, currentHour + 12).map((t, i) => ({
+                                time: t.slice(11, 16),
+                                temp: Math.round(d.hourly.temperature_2m[currentHour + i]),
+                                icon: this.getWeatherIcon(d.hourly.weather_code[currentHour + i])
+                            }));
+                        });
+                },
+
+                getWeatherIcon(code) {
+                    if (code <= 3) return 'fa-solid fa-sun';
+                    if (code <= 60) return 'fa-solid fa-cloud';
+                    return 'fa-solid fa-cloud-showers-heavy';
+                },
+                getWeatherDesc(code) {
+                    if (code <= 3) return '晴れ';
+                    if (code <= 60) return '曇り';
+                    return '雨/雪';
+                },
+                
+                getTransportIcon(desc) {
+                    if (desc.includes('航班')) return 'fa-solid fa-plane-departure';
+                    if (desc.includes('特急') || desc.includes('新幹線')) return 'fa-solid fa-train-subway';
+                    if (desc.includes('巴士')) return 'fa-solid fa-bus';
+                    if (desc.includes('船')) return 'fa-solid fa-ship';
+                    return 'fa-solid fa-route';
+                },
+
+                showBigText(txt) { this.bigTextContent = txt; this.bigTextOpen = true; },
+                speak(txt) { const u = new SpeechSynthesisUtterance(txt); u.lang = 'ja-JP'; window.speechSynthesis.speak(u); },
+                copyText(txt) { navigator.clipboard.writeText(txt); alert('已複製'); },
+                getMapLink(event) { 
+                    if(event.mapLink) return event.mapLink;
+                    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.title + ' ' + this.getCurrentLocation())}`; 
+                },
+                openFullMap() {
+                     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(this.getCurrentLocation())}`;
+                     window.location.href = url;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
